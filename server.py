@@ -118,7 +118,11 @@ def _fmt(data: Any) -> str:
 # MCP Server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("meta_pages_mcp")
+mcp = FastMCP(
+    "meta_pages_mcp",
+    host="0.0.0.0",
+    port=int(os.environ.get("PORT", "10000")),
+)
 
 
 # ===================== PAGES — LIST & INFO =====================
@@ -910,8 +914,5 @@ async def meta_graph_api_call(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "10000"))
-    logger.info(f"Starting Meta Pages MCP server on port {port}")
-    # Ensure uvicorn binds to all interfaces for Render
-    os.environ.setdefault("UVICORN_HOST", "0.0.0.0")
-    mcp.run(transport="streamable-http", port=port)
+    logger.info(f"Starting Meta Pages MCP server on port {mcp.settings.port}")
+    mcp.run(transport="streamable-http")
