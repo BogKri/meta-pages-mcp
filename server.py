@@ -124,6 +124,10 @@ mcp = FastMCP(
     port=int(os.environ.get("PORT", "10000")),
 )
 
+# Configure for stateless HTTP mode (matching working meta-ads-mcp config)
+mcp.settings.stateless_http = True
+mcp.settings.json_response = True
+
 
 # ===================== PAGES — LIST & INFO =====================
 
