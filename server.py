@@ -1,7 +1,7 @@
 """Meta Pages MCP Server — Multi-token Page/Community management.
 
 Supports User Access Token, Page Access Tokens, and App Access Token
-for complete Facebook/Instagram page management.
+for complete Facebook/Instagram page management including Ad Comments.
 """
 
 import os
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _user_token() -> str:
-    token = os.environ.get("META_USER_TOKEN", "")
+    token = os.environ.get("META_ACCESS_TOKEN", "")
     if not token:
-        raise ValueError("META_USER_TOKEN env var is not set")
+        raise ValueError("META_ACCESS_TOKEN env var is not set")
     return token
 
 
@@ -297,6 +297,229 @@ async def meta_hide_comment(comment_id: str, page_id: str, is_hidden: bool = Tru
             data={"is_hidden": str(is_hidden).lower(), "access_token": _page_token(page_id)},
         )
         return _fmt(resp.json())
+
+
+# ===================== AD COMMENTS =====================
+
+@mcp.tool(
+    name="meta_get_ad_accounts",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ad_accounts() -> str:
+    """List all ad accounts the user has access to. Returns account IDs, names, and status.
+    Uses the User Access Token.
+    """
+    data = await _graph_get(
+        "me/adaccounts",
+        {"fields": "id,name,account_id,account_status,currency,timezone_name", "limit": "100"},
+        _user_token(),
+    )
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_get_ad_campaigns",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ad_campaigns(
+    ad_account_id: str,
+    status_filter: str = "ACTIVE",
+    limit: int = 25,
+) -> str:
+    """Get campaigns for an ad account.
+
+    Args:
+        ad_account_id: The ad account ID (format: act_XXXXXXXXX)
+        status_filter: Filter by effective status: ACTIVE, PAUSED, ARCHIVED, or ALL (default ACTIVE)
+        limit: Number of campaigns to return (1-100, default 25)
+    """
+    params: Dict[str, str] = {
+        "fields": "id,name,objective,status,effective_status,daily_budget,lifetime_budget,created_time",
+        "limit": str(min(max(limit, 1), 100)),
+    }
+    if status_filter.upper() != "ALL":
+        params["filtering"] = json.dumps([{"field": "effective_status", "operator": "IN", "value": [status_filter.upper()]}])
+    data = await _graph_get(f"{ad_account_id}/campaigns", params, _user_token())
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_get_ad_adsets",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ad_adsets(
+    ad_account_id: str,
+    campaign_id: Optional[str] = None,
+    status_filter: str = "ACTIVE",
+    limit: int = 25,
+) -> str:
+    """Get ad sets for an ad account, optionally filtered by campaign.
+
+    Args:
+        ad_account_id: The ad account ID (format: act_XXXXXXXXX)
+        campaign_id: Optional campaign ID to filter by
+        status_filter: Filter by effective status: ACTIVE, PAUSED, ARCHIVED, or ALL (default ACTIVE)
+        limit: Number of ad sets to return (1-100, default 25)
+    """
+    params: Dict[str, str] = {
+        "fields": "id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,targeting,optimization_goal",
+        "limit": str(min(max(limit, 1), 100)),
+    }
+    filtering = []
+    if status_filter.upper() != "ALL":
+        filtering.append({"field": "effective_status", "operator": "IN", "value": [status_filter.upper()]})
+    if campaign_id:
+        filtering.append({"field": "campaign.id", "operator": "EQUAL", "value": campaign_id})
+    if filtering:
+        params["filtering"] = json.dumps(filtering)
+    data = await _graph_get(f"{ad_account_id}/adsets", params, _user_token())
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_get_ads",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ads(
+    ad_account_id: str,
+    campaign_id: Optional[str] = None,
+    adset_id: Optional[str] = None,
+    status_filter: str = "ACTIVE",
+    limit: int = 25,
+) -> str:
+    """Get ads for an ad account, optionally filtered by campaign or ad set.
+
+    Args:
+        ad_account_id: The ad account ID (format: act_XXXXXXXXX)
+        campaign_id: Optional campaign ID to filter by
+        adset_id: Optional ad set ID to filter by
+        status_filter: Filter by effective status: ACTIVE, PAUSED, ARCHIVED, or ALL (default ACTIVE)
+        limit: Number of ads to return (1-100, default 25)
+    """
+    params: Dict[str, str] = {
+        "fields": "id,name,status,effective_status,campaign_id,adset_id,creative{id,effective_object_story_id}",
+        "limit": str(min(max(limit, 1), 100)),
+    }
+    filtering = []
+    if status_filter.upper() != "ALL":
+        filtering.append({"field": "effective_status", "operator": "IN", "value": [status_filter.upper()]})
+    if campaign_id:
+        filtering.append({"field": "campaign.id", "operator": "EQUAL", "value": campaign_id})
+    if adset_id:
+        filtering.append({"field": "adset.id", "operator": "EQUAL", "value": adset_id})
+    if filtering:
+        params["filtering"] = json.dumps(filtering)
+    data = await _graph_get(f"{ad_account_id}/ads", params, _user_token())
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_get_ad_creative",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ad_creative(ad_id: str) -> str:
+    """Get the creative details for an ad, including the effective_object_story_id
+    which links to the underlying Page post used for ad comments.
+
+    Args:
+        ad_id: The ad ID
+    """
+    data = await _graph_get(
+        ad_id,
+        {"fields": "id,name,creative{id,effective_object_story_id,object_story_spec,thumbnail_url,title,body}"},
+        _user_token(),
+    )
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_get_ad_comments",
+    annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_get_ad_comments(
+    effective_object_story_id: str,
+    page_id: str,
+    limit: int = 25,
+    filter_type: str = "toplevel",
+) -> str:
+    """Get comments on an ad post using its effective_object_story_id.
+
+    The effective_object_story_id is the underlying Page post ID for the ad.
+    You can get it from meta_get_ads or meta_get_ad_creative.
+
+    Args:
+        effective_object_story_id: The post ID from the ad creative (format: pageId_postId)
+        page_id: The Facebook Page ID that owns the ad (for token lookup)
+        limit: Number of comments to return (1-100, default 25)
+        filter_type: Comment filter: toplevel (default), stream (all including replies)
+    """
+    fields = "id,message,from{id,name},created_time,like_count,comment_count,is_hidden,attachment{media_type,url,media}"
+    params: Dict[str, str] = {
+        "fields": fields,
+        "limit": str(min(max(limit, 1), 100)),
+        "filter": filter_type,
+    }
+    data = await _graph_get(
+        f"{effective_object_story_id}/comments",
+        params,
+        _page_token(page_id),
+    )
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_reply_to_ad_comment",
+    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
+)
+async def meta_reply_to_ad_comment(comment_id: str, page_id: str, message: str) -> str:
+    """Reply to a comment on an ad post as the Page.
+
+    Args:
+        comment_id: The comment ID to reply to
+        page_id: The Facebook Page ID (for token lookup)
+        message: The reply text
+    """
+    data = await _graph_post(
+        f"{comment_id}/comments",
+        {"message": message},
+        _page_token(page_id),
+    )
+    return _fmt(data)
+
+
+@mcp.tool(
+    name="meta_hide_ad_comment",
+    annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_hide_ad_comment(comment_id: str, page_id: str, is_hidden: bool = True) -> str:
+    """Hide or unhide a comment on an ad post.
+
+    Args:
+        comment_id: The comment ID
+        page_id: The Facebook Page ID (for token lookup)
+        is_hidden: True to hide, False to unhide (default True)
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{GRAPH_API_BASE}/{comment_id}",
+            data={"is_hidden": str(is_hidden).lower(), "access_token": _page_token(page_id)},
+        )
+        return _fmt(resp.json())
+
+
+@mcp.tool(
+    name="meta_delete_ad_comment",
+    annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True},
+)
+async def meta_delete_ad_comment(comment_id: str, page_id: str) -> str:
+    """Delete a comment on an ad post.
+
+    Args:
+        comment_id: The comment ID to delete
+        page_id: The Facebook Page ID (for token lookup)
+    """
+    data = await _graph_delete(comment_id, _page_token(page_id))
+    return _fmt(data)
 
 
 # ===================== INSTAGRAM =====================
