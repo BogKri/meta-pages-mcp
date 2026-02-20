@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _user_token() -> str:
-    token = os.environ.get("META_ACCESS_TOKEN", "")
+    token = os.environ.get("META_SYSTEM_USER_TOKEN", "")
     if not token:
-        raise ValueError("META_ACCESS_TOKEN env var is not set")
+        raise ValueError("META_SYSTEM_USER_TOKEN env var is not set")
     return token
 
 
