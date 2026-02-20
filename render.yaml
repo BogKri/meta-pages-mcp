@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: meta-pages-mcp
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: META_USER_TOKEN
+        sync: false
+      - key: META_PAGE_TOKENS
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: PORT
+        value: "8000"
