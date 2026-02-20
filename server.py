@@ -910,6 +910,8 @@ async def meta_graph_api_call(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(os.environ.get("PORT", "10000"))
     logger.info(f"Starting Meta Pages MCP server on port {port}")
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    # Ensure uvicorn binds to all interfaces for Render
+    os.environ.setdefault("UVICORN_HOST", "0.0.0.0")
+    mcp.run(transport="streamable-http", port=port)
